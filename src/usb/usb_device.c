@@ -21,8 +21,6 @@
  */
 
 #include <stddef.h>
-#include <string.h>
-
 #include <MKL25Z4.h>
 
 #include "usb_device.h"
