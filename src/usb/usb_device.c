@@ -1,8 +1,23 @@
-/*
- * usb_device.c
+/**
+ * @file
+ * Implementation of an USB HID device on the KL25
  *
- *  Created on: 02.11.2016
- *      Author: Bernd Kreuss
+ * This implements a full duplex stream over HID protocol,
+ * it is intended to work on Windows without the user needing
+ * to interact with any driver installation, it should load
+ * and use the existing generic HID driver.
+ *
+ * The IN and OUT streams are tunneled over two 63 byte sized
+ * HID reports, each consisting of 1 byte length and up to 62
+ * byte data. The application interface is just two FIFO pipes
+ * for RX and TX.
+ *
+ * Created on: 02.11.2016
+ *     Author: Bernd Kreuss
+ *
+ * Largely inspired by the initial work of Kevin Cuzner:
+ *     http://kevincuzner.com/2014/12/12/teensy-3-1-bare-metal-writing-a-usb-driver/
+ *     https://github.com/kcuzner/teensy-oscilloscope
  */
 
 #include <stddef.h>
