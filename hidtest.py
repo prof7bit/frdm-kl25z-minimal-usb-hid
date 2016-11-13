@@ -1,5 +1,7 @@
-#!/usr/bin/python2
+#!/usr/bin/python3
 
+# this requires cython-hidapi:
+# pip3 install hidapi
 import hid
 
 REPORT_ID_OUT = 2
