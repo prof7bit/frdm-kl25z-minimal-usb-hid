@@ -83,7 +83,7 @@ all: print_size
 $(SRCS): src/usb/usb_descriptors.h
 
 src/usb/usb_descriptors.h: src/usb/usb_descriptors.py
-	py src/usb/usb_descriptors.py
+	src/usb/usb_descriptors.py
 
 .PHONY: install
 install: all
