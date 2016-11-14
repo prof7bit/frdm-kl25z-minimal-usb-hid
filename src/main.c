@@ -4,6 +4,12 @@
 
 volatile unsigned millitime = 0;
 
+static void send_str(char* s) {
+    while (*s) {
+        fifo_push(&usb_tx, *s++);
+    }
+}
+
 int main(void) {
 
     unsigned start_time = 0;
@@ -20,8 +26,8 @@ int main(void) {
         /*
          * pump everything from RX straight back into TX...
          */
-        while(fifo_pop_front(&usb_hidstream_rx, &c)) {
-            fifo_push_back(&usb_hidstream_tx, c);
+        while(fifo_pop(&usb_rx, &c)) {
+            fifo_push(&usb_tx, c);
         }
 
         /*
@@ -29,7 +35,7 @@ int main(void) {
          */
         if (millitime - start_time > 250) {
             start_time = millitime;
-            fifo_push_back(&usb_hidstream_tx, 65 + count);
+            fifo_push(&usb_tx, 65 + count);
             if (count++ == 25) {
                 count = 0;
             }
@@ -37,10 +43,29 @@ int main(void) {
     }
 }
 
+
 /*
- * Implement the hooks for the USB RX/TX LEDs
+ * Hooks and Interrupts
  */
 
+/**
+ * Hook is called when receivig a message packet.
+ * @param data pointer to 62 bytes containg the message
+ */
+void usb_hook_message_packet(volatile uint8_t* data) {
+    if (data[0] == 1) {
+        LED_BL_low();
+        send_str("blue led has been turned on!\n");
+    } else {
+        LED_BL_high();
+        send_str("blue led has been turned off!\n");
+    }
+}
+
+/**
+ * Hook is called to control the RX LED
+ * @param on true if LED should be on, false otherwise
+ */
 void usb_hook_led_rx(bool on) {
     if (on) {
         LED_RD_low();
@@ -49,6 +74,10 @@ void usb_hook_led_rx(bool on) {
     }
 }
 
+/**
+ * Hook is called to control the RX LED
+ * @param on true if LED should be on, false otherwise
+ */
 void usb_hook_led_tx(bool on) {
     if (on) {
         LED_GN_low();

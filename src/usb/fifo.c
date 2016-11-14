@@ -22,7 +22,7 @@ unsigned fifo_get_size(fifo_t* self) {
     return s;
 }
 
-bool fifo_push_back(fifo_t* self, uint8_t byte) {
+bool fifo_push(fifo_t* self, uint8_t byte) {
     if (fifo_get_size(self) < self->capacity) {
         unsigned i = self->write_index;
         self->buffer[i++] = byte;
@@ -35,7 +35,7 @@ bool fifo_push_back(fifo_t* self, uint8_t byte) {
     return false;
 }
 
-bool fifo_pop_front(fifo_t* self, uint8_t* byte) {
+bool fifo_pop(fifo_t* self, uint8_t* byte) {
     if (fifo_get_size(self)) {
         unsigned i = self->read_index;
         *byte = self->buffer[i++];

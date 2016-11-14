@@ -18,8 +18,8 @@
 void usb_device_init(void);
 bool usb_send_message_packet(uint8_t* data, uint8_t size);
 
-extern fifo_t usb_hidstream_tx;
-extern fifo_t usb_hidstream_rx;
+extern fifo_t usb_tx;
+extern fifo_t usb_rx;
 
 /*
  * The hooks below can be implemented by the application,

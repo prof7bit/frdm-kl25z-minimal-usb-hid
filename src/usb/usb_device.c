@@ -133,14 +133,14 @@ static usb_endpoint_buffer_t endpoint_0_rx_buf;
 static usb_endpoint_buffer_t endpoint_1_rx_buf;
 static usb_endpoint_buffer_t endpoint_1_tx_buf;
 
-static uint8_t hidstream_tx_fifo_buf[512] = {};
-static uint8_t hidstream_rx_fifo_buf[512] = {};
-
 static volatile message_packet_state_t message_packet_state = MSG_FREE;
 static volatile uint8_t message_packet[64];
 
-fifo_t usb_hidstream_rx;
-fifo_t usb_hidstream_tx;
+static uint8_t tx_fifo_buf[512] = {};
+static uint8_t rx_fifo_buf[512] = {};
+
+fifo_t usb_rx;
+fifo_t usb_tx;
 
 /**
  * Buffer descriptor table, aligned to a 512-byte boundary
@@ -241,8 +241,8 @@ void usb_device_init(void) {
     USB0->CONTROL = USB_CONTROL_DPPULLUPNONOTG_MASK;
 
     // initialize FIFO buffers for the stream-over-hid protocol.
-    fifo_init(&usb_hidstream_rx, hidstream_rx_fifo_buf, sizeof(hidstream_rx_fifo_buf));
-    fifo_init(&usb_hidstream_tx, hidstream_tx_fifo_buf, sizeof(hidstream_tx_fifo_buf));
+    fifo_init(&usb_rx, rx_fifo_buf, sizeof(rx_fifo_buf));
+    fifo_init(&usb_tx, tx_fifo_buf, sizeof(tx_fifo_buf));
 }
 
 void endpoint_prepare_next_tx(uint8_t endpoint, volatile void* data, uint8_t length) {
@@ -298,11 +298,11 @@ static void endpoint_1_check_tx() {
          * then fill the next TX buffer for sending.
          */
         } else {
-            if (fifo_get_size(&usb_hidstream_tx)) {
+            if (fifo_get_size(&usb_tx)) {
                 usb_hook_led_tx(true);
                 uint8_t odd = endpoint_state[1].tx_odd;
                 uint8_t i = 2;
-                while ((i < 64) && fifo_pop_front(&usb_hidstream_tx, &tx_byte)) {
+                while ((i < 64) && fifo_pop(&usb_tx, &tx_byte)) {
                     endpoint_1_tx_buf[odd][i++] = tx_byte;
                 }
                 endpoint_1_tx_buf[odd][0] = REPORT_ID_TX;
@@ -356,7 +356,7 @@ static void endpoint_1_handler(uint8_t tok, buffer_descriptor_t* buf_desc) {
                  */
                 if (p->report_id == REPORT_ID_RX) {
                     for (int i = 0; i < p->payload_size; ++i) {
-                        fifo_push_back(&usb_hidstream_rx, p->payload_data[i]);
+                        fifo_push(&usb_rx, p->payload_data[i]);
                     }
                 }
             } else if (p->payload_size == MAGIC_MESSAGE_PACKET) {
