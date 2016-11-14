@@ -26,5 +26,6 @@ extern fifo_t usb_hidstream_rx;
  */
 extern void usb_hook_led_tx(bool on);
 extern void usb_hook_led_rx(bool on);
+extern void usb_hook_message_packet(volatile uint8_t* data);
 
 #endif /* SRC_USB_USB_DEVICE_H_ */

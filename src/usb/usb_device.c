@@ -56,6 +56,8 @@
 #define REPORT_ID_TX                    1
 
 #define WEAK                            __attribute((weak))
+#define ALIGN512                        __attribute((aligned(512)))
+
 
 /**
  * Buffer Descriptor Table entry
@@ -129,11 +131,14 @@ fifo_t usb_hidstream_tx;
 /**
  * Buffer descriptor table, aligned to a 512-byte boundary
  */
-__attribute__ ((aligned(512)))
-static buffer_descriptor_t buf_desc_table[USB_NUM_ENDPOINTS * 4];
+ALIGN512 static buffer_descriptor_t buf_desc_table[USB_NUM_ENDPOINTS * 4];
 
+/*
+ * weak empty default implementations of the hook functions
+ */
 WEAK void usb_hook_led_rx(bool on) {}
 WEAK void usb_hook_led_tx(bool on) {}
+WEAK void usb_hook_message_packet(volatile uint8_t* data) {}
 
 static void init_buffer_descriptor(uint8_t endpoint, usb_endpoint_buffer_t buffer, uint8_t buffer_size) {
     endpoint_state[endpoint].tx_odd = EVEN;
@@ -269,11 +274,29 @@ static void endpoint_1_handler(uint8_t tok, buffer_descriptor_t* buf_desc) {
         usb_hook_led_rx(true);
         p = buf_desc->addr;
         size = buf_desc->desc >> 16;
-        if ((size > sizeof(hid_packet_t)) && (p->payload_size <= size - sizeof(hid_packet_t))) {
-            if (p->report_id == REPORT_ID_RX) {
-                for (int i = 0; i < p->payload_size; ++i) {
-                    fifo_push_back(&usb_hidstream_rx, p->payload_data[i]);
+        if (size > sizeof(hid_packet_t) && p->report_id == REPORT_ID_RX) {
+            if (p->payload_size <= size - sizeof(hid_packet_t)) {
+                /*
+                 * all packets with a payload of 0..62 are
+                 * interpreted as stream data, the payload data
+                 * is extracted and pushed into the RX FIFO.
+                 */
+                if (p->report_id == REPORT_ID_RX) {
+                    for (int i = 0; i < p->payload_size; ++i) {
+                        fifo_push_back(&usb_hidstream_rx, p->payload_data[i]);
+                    }
                 }
+            } else {
+                /*
+                 * all packets that have a payload > 62
+                 * are considered "message packets, they
+                 * can be used to transport arbitrary control
+                 * data independent of the stream and are
+                 * passed to the application as they are,
+                 * they can be handled when the application
+                 * implements the hook function below.
+                 */
+                usb_hook_message_packet(buf_desc->addr);
             }
         }
         break;
