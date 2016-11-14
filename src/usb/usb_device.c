@@ -12,6 +12,10 @@
  * byte data. The application interface is just two FIFO pipes
  * for RX and TX.
  *
+ * Additionally a special message packet of 62 byte can be
+ * transmitted outside the stream and with higher priority,
+ * this can be used for arbitrary control and status purposes.
+ *
  * Created on: 02.11.2016
  *     Author: Bernd Kreuss
  *
@@ -54,6 +58,7 @@
 
 #define REPORT_ID_RX                    2
 #define REPORT_ID_TX                    1
+#define MAGIC_MESSAGE_PACKET            0xff
 
 #define WEAK                            __attribute((weak))
 #define ALIGN512                        __attribute((aligned(512)))
@@ -116,6 +121,12 @@ typedef struct {
     uint8_t tx_data1;
 } endpoint_state_t;
 
+typedef enum {
+    MSG_QUEUED,
+    MSG_TRANSMITTING,
+    MSG_FREE
+} message_packet_state_t;
+
 static endpoint_state_t endpoint_state[USB_NUM_ENDPOINTS] = {};
 
 static usb_endpoint_buffer_t endpoint_0_rx_buf;
@@ -124,6 +135,9 @@ static usb_endpoint_buffer_t endpoint_1_tx_buf;
 
 static uint8_t hidstream_tx_fifo_buf[512] = {};
 static uint8_t hidstream_rx_fifo_buf[512] = {};
+
+static volatile message_packet_state_t message_packet_state = MSG_FREE;
+static volatile uint8_t message_packet[64];
 
 fifo_t usb_hidstream_rx;
 fifo_t usb_hidstream_tx;
@@ -139,6 +153,37 @@ ALIGN512 static buffer_descriptor_t buf_desc_table[USB_NUM_ENDPOINTS * 4];
 WEAK void usb_hook_led_rx(bool on) {}
 WEAK void usb_hook_led_tx(bool on) {}
 WEAK void usb_hook_message_packet(volatile uint8_t* data) {}
+
+/**
+ * A "message packet" here is nothing USB specific, instead it
+ * belongs to my own little stream over HID protocol, all packets
+ * with a payload size containing the magic number are considered
+ * not part of the streming data but are part of a separate kind
+ * of "control channel" that can exchange messages of up to 62
+ * byte per message. These messages have priority over the queued
+ * stream data.
+ *
+ * This function will enqueue such a message by copying the data to
+ * its own buffer and return true if successful. It will be sent
+ * through the next available IN transaction. If there is already
+ * a message queued then nothing happens and the function just
+ * returns false, the application must try again later.
+ */
+bool usb_send_message_packet(uint8_t* data, uint8_t size) {
+    if (message_packet_state == MSG_FREE){
+        if (size > sizeof(message_packet) - 2) {
+            size = sizeof(message_packet) - 2;
+        }
+        message_packet[0] = REPORT_ID_TX;
+        message_packet[1] = MAGIC_MESSAGE_PACKET;
+        for (int i=0; i<size; i++) {
+            message_packet[i+2] = data[i];
+        }
+        message_packet_state = MSG_QUEUED;
+        return true;
+    }
+    return false;
+}
 
 static void init_buffer_descriptor(uint8_t endpoint, usb_endpoint_buffer_t buffer, uint8_t buffer_size) {
     endpoint_state[endpoint].tx_odd = EVEN;
@@ -239,23 +284,38 @@ static bool endpoint_have_free_tx_descriptor(uint8_t endpoint) {
 static void endpoint_1_check_tx() {
     uint8_t tx_byte;
     if (endpoint_have_free_tx_descriptor(1)) {
-        if (fifo_get_size(&usb_hidstream_tx)) {
-            usb_hook_led_tx(true);
-            uint8_t odd = endpoint_state[1].tx_odd;
-            uint8_t i = 2;
-            while ((i < 64) && fifo_pop_front(&usb_hidstream_tx, &tx_byte)) {
-                endpoint_1_tx_buf[odd][i++] = tx_byte;
-            }
-            endpoint_1_tx_buf[odd][0] = REPORT_ID_TX;
-            endpoint_1_tx_buf[odd][1] = i - 2; // payload size
 
-            /*
-             * Due to a bug in the generic Windows HID driver we must always
-             * either TX a full sized packet or no packet at all, otherwise
-             * the driver would be confused. This is also the reason we need
-             * to waste one byte for the payload size in our reports.
-             */
-            endpoint_prepare_next_tx(1, endpoint_1_tx_buf[odd], 64);
+        /*
+         * Our special message packets have priority
+         * over stream data.
+         */
+        if (message_packet_state == MSG_QUEUED) {
+            endpoint_prepare_next_tx(1, message_packet, 64);
+            message_packet_state = MSG_TRANSMITTING;
+
+        /*
+         * Check if data is in the TX queue and if so
+         * then fill the next TX buffer for sending.
+         */
+        } else {
+            if (fifo_get_size(&usb_hidstream_tx)) {
+                usb_hook_led_tx(true);
+                uint8_t odd = endpoint_state[1].tx_odd;
+                uint8_t i = 2;
+                while ((i < 64) && fifo_pop_front(&usb_hidstream_tx, &tx_byte)) {
+                    endpoint_1_tx_buf[odd][i++] = tx_byte;
+                }
+                endpoint_1_tx_buf[odd][0] = REPORT_ID_TX;
+                endpoint_1_tx_buf[odd][1] = i - 2; // payload size
+
+                /*
+                 * Due to a bug in the generic Windows HID driver we must always
+                 * either TX a full sized packet or no packet at all, otherwise
+                 * the driver would be confused. This is also the reason we need
+                 * to waste one byte for the payload size in our reports.
+                 */
+                endpoint_prepare_next_tx(1, endpoint_1_tx_buf[odd], 64);
+            }
         }
     }
 }
@@ -267,6 +327,19 @@ static void endpoint_1_handler(uint8_t tok, buffer_descriptor_t* buf_desc) {
     switch (tok) {
 
     case TOK_IN:
+        /*
+         * check whether the last TX was one of our special message
+         * packets and if so mark the message buffer as free again.
+         */
+        if (message_packet_state == MSG_TRANSMITTING) {
+            if (((uint8_t*)buf_desc->addr)[1] == MAGIC_MESSAGE_PACKET) {
+                message_packet_state = MSG_FREE;
+            }
+        }
+
+        /*
+         * check whether there is still more data left to transmit
+         */
         endpoint_1_check_tx();
         break;
 
@@ -286,17 +359,16 @@ static void endpoint_1_handler(uint8_t tok, buffer_descriptor_t* buf_desc) {
                         fifo_push_back(&usb_hidstream_rx, p->payload_data[i]);
                     }
                 }
-            } else {
+            } else if (p->payload_size == MAGIC_MESSAGE_PACKET) {
                 /*
-                 * all packets that have a payload > 62
-                 * are considered "message packets, they
-                 * can be used to transport arbitrary control
-                 * data independent of the stream and are
-                 * passed to the application as they are,
-                 * they can be handled when the application
-                 * implements the hook function below.
+                 * since there is a range of otherwise invalid
+                 * sizes above 62 we can use the size field to
+                 * encode a special marker here for a special
+                 * type of packet that does not contain stream
+                 * data. The application can implement the hook
+                 * below to receive them if it so wishes.
                  */
-                usb_hook_message_packet(buf_desc->addr);
+                usb_hook_message_packet(p->payload_data);
             }
         }
         break;
