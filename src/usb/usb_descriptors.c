@@ -101,7 +101,7 @@ static const uint8_t device_descriptor[18] = {
     0x01, // bNumConfigurations
 };
 
-static const uint8_t report_descriptor[32] = {
+static const uint8_t report_descriptor[28] = {
     0x05,
     0x01,
     0x09,
@@ -113,22 +113,18 @@ static const uint8_t report_descriptor[32] = {
     0x26,
     0xff,
     0x00,
-    0x85,
-    0x01,
     0x75,
     0x08,
     0x95,
-    0x3f,
+    0x40,
     0x09,
     0x00,
     0x81,
     0x82,
-    0x85,
-    0x02,
     0x75,
     0x08,
     0x95,
-    0x3f,
+    0x40,
     0x09,
     0x00,
     0x91,
@@ -244,7 +240,7 @@ static const uint8_t configuration_descriptor[41] = {
     0x00, // bCountryCode
     0x01, // bNumDescriptors
     0x22, // bDescriptorType
-    0x20, // wItemLength (lo)
+    0x1c, // wItemLength (lo)
     0x00, // wItemLength (hi)
     0x07, // bLength (*** Endpoint ***)
     0x05, // bDescriptorType

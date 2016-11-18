@@ -4,15 +4,14 @@
 # pip3 install hidapi
 import hid
 
-REPORT_ID_OUT = 2
 
 def send_string(d, text):
     
-    # truncate to 62 bytes
-    text = text[:62]
+    # truncate to 63 bytes
+    text = text[:63]
     
     # prepare header
-    x = [REPORT_ID_OUT, len(text)]
+    x = [len(text)]
     for c in text:
         x.append(ord(c))
         
@@ -27,12 +26,12 @@ def send_string(d, text):
 def recv_string(d):
     s = ""
     x = d.read(64)
-    if len(x) > 2:
+    if len(x) > 1:
         
         # parse header and
         # extract payload
-        size = x[1]
-        x = x[2:][:size]
+        size = x[0]
+        x = x[1:][:size]
         
         # convert to string
         for c in x:

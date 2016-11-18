@@ -110,11 +110,10 @@ typedef struct {
  * will always either send a full sized packet or no packet at
  * all, no matter the actual byte count to transmit.
  */
-typedef struct {
-    uint8_t report_id;
+typedef volatile struct {
     uint8_t payload_size;
     uint8_t payload_data[];
-} hid_packet_t;
+} hid_packet_header_t;
 
 typedef struct {
     uint8_t tx_odd;
@@ -134,7 +133,7 @@ static usb_endpoint_buffer_t endpoint_1_rx_buf;
 static usb_endpoint_buffer_t endpoint_1_tx_buf;
 
 static volatile message_packet_state_t message_packet_state = MSG_FREE;
-static volatile uint8_t message_packet[64];
+static volatile uint8_t message_packet_buffer[64];
 
 static uint8_t tx_fifo_buf[512] = {};
 static uint8_t rx_fifo_buf[512] = {};
@@ -158,8 +157,8 @@ WEAK void usb_hook_message_packet(volatile uint8_t* data) {}
  * A "message packet" here is nothing USB specific, instead it
  * belongs to my own little stream over HID protocol, all packets
  * with a payload size containing the magic number are considered
- * not part of the streming data but are part of a separate kind
- * of "control channel" that can exchange messages of up to 62
+ * not part of the streaming data but are part of a separate kind
+ * of "control channel" that can exchange messages of up to 63
  * byte per message. These messages have priority over the queued
  * stream data.
  *
@@ -171,13 +170,13 @@ WEAK void usb_hook_message_packet(volatile uint8_t* data) {}
  */
 bool usb_send_message_packet(uint8_t* data, uint8_t size) {
     if (message_packet_state == MSG_FREE){
-        if (size > sizeof(message_packet) - 2) {
-            size = sizeof(message_packet) - 2;
+        if (size > sizeof(message_packet_buffer) - sizeof(hid_packet_header_t)) {
+            size = sizeof(message_packet_buffer) - sizeof(hid_packet_header_t);
         }
-        message_packet[0] = REPORT_ID_TX;
-        message_packet[1] = MAGIC_MESSAGE_PACKET;
+        hid_packet_header_t* p = (hid_packet_header_t*)message_packet_buffer;
+        p->payload_size = MAGIC_MESSAGE_PACKET;
         for (int i=0; i<size; i++) {
-            message_packet[i+2] = data[i];
+            p->payload_data[i] = data[i];
         }
         message_packet_state = MSG_QUEUED;
         return true;
@@ -290,7 +289,7 @@ static void endpoint_1_check_tx() {
          * over stream data.
          */
         if (message_packet_state == MSG_QUEUED) {
-            endpoint_prepare_next_tx(1, message_packet, 64);
+            endpoint_prepare_next_tx(1, message_packet_buffer, 64);
             message_packet_state = MSG_TRANSMITTING;
 
         /*
@@ -301,12 +300,12 @@ static void endpoint_1_check_tx() {
             if (fifo_get_size(&usb_tx)) {
                 usb_hook_led_tx(true);
                 uint8_t odd = endpoint_state[1].tx_odd;
-                uint8_t i = 2;
-                while ((i < 64) && fifo_pop(&usb_tx, &tx_byte)) {
-                    endpoint_1_tx_buf[odd][i++] = tx_byte;
+                hid_packet_header_t* p = (hid_packet_header_t*)endpoint_1_tx_buf[odd];
+                uint8_t i = 0;
+                while ((i < 64 - sizeof(hid_packet_header_t)) && fifo_pop(&usb_tx, &tx_byte)) {
+                    p->payload_data[i++] = tx_byte;
                 }
-                endpoint_1_tx_buf[odd][0] = REPORT_ID_TX;
-                endpoint_1_tx_buf[odd][1] = i - 2; // payload size
+                p->payload_size = i;
 
                 /*
                  * Due to a bug in the generic Windows HID driver we must always
@@ -314,14 +313,14 @@ static void endpoint_1_check_tx() {
                  * the driver would be confused. This is also the reason we need
                  * to waste one byte for the payload size in our reports.
                  */
-                endpoint_prepare_next_tx(1, endpoint_1_tx_buf[odd], 64);
+                endpoint_prepare_next_tx(1, p, 64);
             }
         }
     }
 }
 
 static void endpoint_1_handler(uint8_t tok, buffer_descriptor_t* buf_desc) {
-    volatile hid_packet_t* p;
+    hid_packet_header_t* p;
     uint8_t size;
 
     switch (tok) {
@@ -332,7 +331,8 @@ static void endpoint_1_handler(uint8_t tok, buffer_descriptor_t* buf_desc) {
          * packets and if so mark the message buffer as free again.
          */
         if (message_packet_state == MSG_TRANSMITTING) {
-            if (((uint8_t*)buf_desc->addr)[1] == MAGIC_MESSAGE_PACKET) {
+            p = buf_desc->addr;
+            if (p->payload_size == MAGIC_MESSAGE_PACKET) {
                 message_packet_state = MSG_FREE;
             }
         }
@@ -347,18 +347,17 @@ static void endpoint_1_handler(uint8_t tok, buffer_descriptor_t* buf_desc) {
         usb_hook_led_rx(true);
         p = buf_desc->addr;
         size = buf_desc->desc >> 16;
-        if (size > sizeof(hid_packet_t) && p->report_id == REPORT_ID_RX) {
-            if (p->payload_size <= size - sizeof(hid_packet_t)) {
+        if (size > sizeof(hid_packet_header_t)) {
+            if (p->payload_size <= size - sizeof(hid_packet_header_t)) {
                 /*
-                 * all packets with a payload of 0..62 are
+                 * all packets with a payload of 0..63 are
                  * interpreted as stream data, the payload data
                  * is extracted and pushed into the RX FIFO.
                  */
-                if (p->report_id == REPORT_ID_RX) {
-                    for (int i = 0; i < p->payload_size; ++i) {
-                        fifo_push(&usb_rx, p->payload_data[i]);
-                    }
+                for (int i = 0; i < p->payload_size; ++i) {
+                    fifo_push(&usb_rx, p->payload_data[i]);
                 }
+
             } else if (p->payload_size == MAGIC_MESSAGE_PACKET) {
                 /*
                  * since there is a range of otherwise invalid

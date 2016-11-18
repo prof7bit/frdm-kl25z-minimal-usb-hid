@@ -49,8 +49,8 @@ int main(void) {
  */
 
 /**
- * Hook is called when receivig a message packet.
- * @param data pointer to 62 bytes containg the message
+ * Hook is called when receiving a message packet.
+ * @param data pointer to 63 bytes containing the message
  */
 void usb_hook_message_packet(volatile uint8_t* data) {
     if (data[0] == 1) {
