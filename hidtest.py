@@ -5,11 +5,13 @@
 import hid
 import os
 
-def send_hid(d, x):
-    if os.name == 'nt':
-        buf = [0] + x
-    else:
-        buf = x
+def send_hid_report(d, x):
+    assert(len(x) == 64)
+    # Prepend report ID, this is required by the API
+    # but it will not go over the wire if the report
+    # has no ID in the report descriptor. So we pass
+    # 65 bytes to the API but it will send only 64.
+    buf = [0] + x
     return d.write(buf)
 
 
@@ -28,7 +30,7 @@ def send_string(d, text):
     while len(x) < 64:
         x.append(0)
     
-    num = send_hid(d, x)
+    send_hid_report(d, x)
     print("    sent: " + text)
 
 def recv_string(d):
@@ -47,14 +49,15 @@ def recv_string(d):
             
     return s
 
-def send_msg(d, b):
+def send_msg(d, led):
     x = [0] * 64
-    x[0] = 255
-    x[1] = b
-    send_hid(d, x)
+    x[0] = 255    # magic number
+    x[1] = led    # first byte controls blue LED
+    send_hid_report(d, x)
+    print("    sent: Message packet with {}".format(led))
 
 def main():
-    toggle = 1
+    led_toggle = 1
     d = hid.device()
     d.open(0xdead, 0xbeef)
 
@@ -62,8 +65,8 @@ def main():
         if i % 10 == 0:
             send_string(d, "Hello world!")
         if i % 11 == 0:
-            send_msg(d, toggle)
-            toggle = 1 - toggle
+            send_msg(d, led_toggle)
+            led_toggle = 1 - led_toggle
         print("received: " + recv_string(d).strip())
 
     d.close()
