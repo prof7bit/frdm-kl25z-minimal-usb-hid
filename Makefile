@@ -6,10 +6,10 @@ NAME      = frdm_kl25z_minimal_usb_hid
 
 MKDIR     = mkdir -p
 
-SRCS      = $(wildcard src/*.c)
+SRCS     += $(wildcard kl25_src/*.s)
+SRCS     += $(wildcard src/*.c)
 SRCS     += $(wildcard src/usb/*.c)
 SRCS     += $(wildcard kl25_src/*.c)
-SRCS     += $(wildcard kl25_src/*.s)
 SRCS     += src/usb/usb_descriptors.c
 
 INCDIRS   = src/
