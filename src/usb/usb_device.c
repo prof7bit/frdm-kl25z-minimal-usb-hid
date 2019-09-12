@@ -419,7 +419,8 @@ static void endpoint_0_handler(uint8_t tok, buffer_descriptor_t* buf_desc) {
         case 0x0680: //get descriptor
         case 0x0681:
             must_stall = true;
-            for (unsigned i=0; i<sizeof(descriptor_table);i++) {
+            const unsigned num_descr = sizeof(descriptor_table) / sizeof(descriptor_table_t);
+            for (unsigned i=0; i<num_descr; i++) {
                 if (setup.wValue == descriptor_table[i].wValue
                 &&  setup.wIndex == descriptor_table[i].wIndex) {
                     tx_data_ptr = (uint8_t*)descriptor_table[i].descriptor;
